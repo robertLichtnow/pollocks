@@ -1,0 +1,16 @@
+{
+  "name": "pollocks",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "build": "bun build index.ts --outdir ./dist",
+    "lint": "oxlint"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "oxlint": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
