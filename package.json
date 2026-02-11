@@ -1,16 +1,23 @@
 {
   "name": "pollocks",
-  "module": "index.ts",
+  "module": "src/index.ts",
   "type": "module",
   "scripts": {
-    "build": "bun build index.ts --outdir ./dist",
-    "lint": "oxlint"
+    "build": "bun build src/index.ts --outdir ./dist --target node",
+    "lint": "oxlint",
+    "test": "bun run src/test.ts"
+  },
+  "dependencies": {
+    "umzug": "3.8.2"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "oxlint": "latest"
+    "@types/bun": "1.3.9",
+    "@types/pg": "8.16.0",
+    "oxlint": "1.46.0",
+    "pg": "8.18.0"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5",
+    "pg": "^8.0.0"
   }
 }
