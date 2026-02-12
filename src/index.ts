@@ -1,1 +1,2 @@
-export * from "./pollocks-worker";
+export * from "./worker";
+export * from "./tools";

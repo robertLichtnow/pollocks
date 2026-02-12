@@ -1,0 +1,3 @@
+ALTER TABLE jobs
+  ADD COLUMN IF NOT EXISTS lock_for integer NOT NULL DEFAULT 3600
+  CHECK (lock_for > 0);

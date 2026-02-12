@@ -2,36 +2,24 @@ import type { Pool, PoolClient } from "pg";
 import { Umzug } from "umzug";
 import path from "path";
 import fs from "fs/promises";
+import { z } from "zod";
+import { randomUUID } from "crypto";
 import { PgStorage } from "./pg-storage";
 
-/**
- 
- */
-export type Mode = 'poll' | 'listen';
+const addJobSchema = z.object({
+  payload: z
+    .union([z.record(z.string(), z.unknown()), z.array(z.unknown())])
+    .optional()
+    .default({}),
+  runAfter: z.coerce.date().optional().default(() => new Date()),
+  lockFor: z.number().int().positive().optional().default(3600),
+  identifier: z.string().min(1),
+});
 
-export interface PollocksWorkerConfig {
-  /**
-   * The number of pools to run in parallel
-   * Use `poll` when you have a high volume of jobs and don't need jobs to be picked up immediately.
-   * Use `listen` when you have a low volume of jobs and need jobs to be picked up immediately.
-   */
-  parallelism?: number;
-  /**
-   * The mode to use for the worker
-   */
-  mode?: Mode;
-}
+export type AddJobInput = z.infer<typeof addJobSchema>;
 
-export const DEFAULT_CONFIG: Required<PollocksWorkerConfig> = {
-  parallelism: 1,
-  mode: 'poll',
-}
-
-export class PollocksWorker {
-  constructor(
-    readonly pool: Pool,
-    readonly config?: PollocksWorkerConfig,
-  ) {}
+export class Tools {
+  constructor(readonly pool: Pool) {}
 
   private createUmzug(poolClient: PoolClient) {
     const migrationsDir = path.join(import.meta.dirname, 'migrations');
@@ -50,7 +38,7 @@ export class PollocksWorker {
             name: migrationName,
             up: async () => {
               const sql = await fs.readFile(path!, "utf8");
-    
+
               const client = context;
               try {
                 await client.query("BEGIN");
@@ -85,18 +73,18 @@ export class PollocksWorker {
     }
   }
 
-  async start() {
-    // TODO: Implement start logic
-  }
-  
-  async stop() {
-    // TODO: Implement stop logic
+  async addJob(input: AddJobInput) {
+    const parsed = addJobSchema.parse(input);
+    const id = randomUUID();
+
+    await this.pool.query(
+      `SELECT add_job($1, $2::jsonb, $3, $4, $5)`,
+      [id, JSON.stringify(parsed.payload), parsed.identifier, parsed.runAfter, parsed.lockFor],
+    );
+    return { id };
   }
 
-  get mergedConfig(): Required<PollocksWorkerConfig> {
-    return {
-      ...DEFAULT_CONFIG,
-      ...this.config,
-    }
+  async getJob() {
+    // TODO: Implement getJob
   }
 }
