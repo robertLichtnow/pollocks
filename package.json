@@ -10,6 +10,7 @@
     "docker:down": "docker-compose down"
   },
   "dependencies": {
+    "ulid": "^3.0.2",
     "umzug": "3.8.2",
     "zod": "^4.3.6"
   },

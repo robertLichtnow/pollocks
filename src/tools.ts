@@ -3,8 +3,9 @@ import { Umzug } from "umzug";
 import path from "path";
 import fs from "fs/promises";
 import { z } from "zod";
-import { randomUUID } from "crypto";
+import { ulid } from "ulid";
 import { PgStorage } from "./pg-storage";
+import type { Job } from "./types";
 
 const addJobSchema = z.object({
   payload: z
@@ -75,13 +76,22 @@ export class Tools {
 
   async addJob(input: AddJobInput) {
     const parsed = addJobSchema.parse(input);
-    const id = randomUUID();
+    const id = ulid();
 
     await this.pool.query(
       `SELECT add_job($1, $2::jsonb, $3, $4, $5)`,
       [id, JSON.stringify(parsed.payload), parsed.identifier, parsed.runAfter, parsed.lockFor],
     );
     return { id };
+  }
+
+  async acquireJob(lockedBy?: string | null): Promise<Job | undefined> {
+    const result = await this.pool.query<Job>(
+      `SELECT * FROM acquire_job($1)`,
+      [lockedBy ?? null],
+    );
+    const row = result.rows[0] ?? undefined;
+    return row;
   }
 
   async getJob() {

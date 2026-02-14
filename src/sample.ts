@@ -17,4 +17,8 @@ const { id } = await tools.addJob({
 });
 
 console.log(`Job added with id: ${id}`);
+
+const acquiredJob = await tools.acquireJob();
+console.log(`Acquired job: ${JSON.stringify(acquiredJob)}`);
+
 await pool.end();
