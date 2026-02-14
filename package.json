@@ -5,7 +5,7 @@
   "scripts": {
     "build": "bun build src/index.ts --outdir ./dist --target node",
     "lint": "oxlint",
-    "test": "bun run src/test.ts",
+    "sample": "bun run src/sample.ts",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down"
   },
