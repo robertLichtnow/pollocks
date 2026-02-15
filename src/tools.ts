@@ -14,10 +14,10 @@ const addJobSchema = z.object({
     .default({}),
   runAfter: z.coerce.date().optional().default(() => new Date()),
   lockFor: z.number().int().positive().optional().default(3600),
-  identifier: z.string().min(1),
+  pattern: z.string().min(1),
 });
 
-export type AddJobInput = z.infer<typeof addJobSchema>;
+export type AddJobInput = z.input<typeof addJobSchema>;
 
 export class Tools {
   constructor(readonly pool: Pool) {}
@@ -80,7 +80,7 @@ export class Tools {
 
     await this.pool.query(
       `SELECT add_job($1, $2::jsonb, $3, $4, $5)`,
-      [id, JSON.stringify(parsed.payload), parsed.identifier, parsed.runAfter, parsed.lockFor],
+      [id, JSON.stringify(parsed.payload), parsed.pattern, parsed.runAfter, parsed.lockFor],
     );
     return { id };
   }
@@ -94,7 +94,11 @@ export class Tools {
     return row;
   }
 
-  async getJob() {
-    // TODO: Implement getJob
+  async completeJob(id: string): Promise<void> {
+    await this.pool.query(`SELECT complete_job($1)`, [id]);
+  }
+
+  async completeJobs(ids: string[]): Promise<void> {
+    await this.pool.query(`SELECT complete_jobs($1)`, [ids]);
   }
 }

@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { Tools } from "./tools";
+import type { Job } from "./types";
 
 const pool = new Pool({
   connectionString: "postgres://postgres:postgres@localhost:5432/pollocks",
@@ -11,14 +12,43 @@ await tools.migrate();
 
 const { id } = await tools.addJob({
   payload: [{ message: "Hello, world!" }],
-  identifier: "test",
-  runAfter: new Date(),
+  pattern: "test",
   lockFor: 3600,
 });
 
 console.log(`Job added with id: ${id}`);
 
-const acquiredJob = await tools.acquireJob();
-console.log(`Acquired job: ${JSON.stringify(acquiredJob)}`);
+let acquiredJob: Job | undefined;
+while ((acquiredJob = await tools.acquireJob()) !== undefined) {
+  console.log(`Acquired job: ${JSON.stringify(acquiredJob)}`);
+  await tools.completeJob(acquiredJob.id);
+  console.log(`Completed job: ${acquiredJob.id}`);
+}
+
+console.log("Creating 10 jobs...");
+const createdIds: string[] = [];
+for (let i = 0; i < 10; i++) {
+  const { id } = await tools.addJob({
+    payload: [{ message: "Hello, world!", index: i + 1 }],
+    pattern: "test",
+    lockFor: 3600,
+  });
+  createdIds.push(id);
+  console.log(`Created job ${i + 1}/10: ${id}`);
+}
+
+console.log("Acquiring jobs one by one...");
+const acquiredIds: string[] = [];
+for (let i = 0; i < 10; i++) {
+  const job: Job | undefined = await tools.acquireJob();
+  if (job) {
+    acquiredIds.push(job.id);
+    console.log(`Acquired job ${i + 1}/10: ${job.id}`);
+  }
+}
+
+console.log(`Completing all ${acquiredIds.length} jobs with completeJobs...`);
+await tools.completeJobs(acquiredIds);
+console.log(`Completed job ids: ${acquiredIds.join(", ")}`);
 
 await pool.end();
