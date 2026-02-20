@@ -25,17 +25,15 @@ while ((acquiredJob = await tools.acquireJob()) !== undefined) {
   console.log(`Completed job: ${acquiredJob.id}`);
 }
 
-console.log("Creating 10 jobs...");
-const createdIds: string[] = [];
-for (let i = 0; i < 10; i++) {
-  const { id } = await tools.addJob({
+console.log("Creating 10 jobs with addJobs...");
+const created = await tools.addJobs(
+  Array.from({ length: 10 }, (_, i) => ({
     payload: [{ message: "Hello, world!", index: i + 1 }],
     pattern: "test",
     lockFor: 3600,
-  });
-  createdIds.push(id);
-  console.log(`Created job ${i + 1}/10: ${id}`);
-}
+  })),
+);
+created.forEach((j, i) => console.log(`Created job ${i + 1}/10: ${j.id}`));
 
 console.log("Acquiring jobs one by one...");
 const acquiredIds: string[] = [];

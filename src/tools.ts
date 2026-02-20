@@ -85,6 +85,27 @@ export class Tools {
     return { id };
   }
 
+  async addJobs(inputs: AddJobInput[]) {
+    if (inputs.length === 0) return [];
+
+    const jobs = inputs.map((input) => {
+      const parsed = addJobSchema.parse(input);
+      return {
+        id: ulid(),
+        payload: parsed.payload,
+        pattern: parsed.pattern,
+        run_after: parsed.runAfter.toISOString(),
+        lock_for: parsed.lockFor,
+      };
+    });
+
+    await this.pool.query(
+      `SELECT add_jobs($1::jsonb)`,
+      [JSON.stringify(jobs)],
+    );
+    return jobs.map((j) => ({ id: j.id }));
+  }
+
   async acquireJob(lockedBy?: string | null): Promise<Job | undefined> {
     const result = await this.pool.query<Job>(
       `SELECT * FROM acquire_job($1)`,
