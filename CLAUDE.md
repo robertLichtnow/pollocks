@@ -37,3 +37,4 @@ Core job operations (add, acquire, complete) are implemented as PostgreSQL funct
 - Migrations are numbered sequentially (`001_`, `002_`, etc.) and are plain SQL
 - `pg` is a peer/dev dependency — consumers provide their own `Pool`
 - TypeScript strict mode enabled
+- Do not include Co-Authored-By lines in commit messages
