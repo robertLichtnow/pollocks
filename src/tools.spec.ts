@@ -25,15 +25,15 @@ describe("migrate", () => {
     const result = await pool.query(
       `SELECT name FROM _migrations ORDER BY name`,
     );
-    expect(result.rows.length).toBe(8);
+    expect(result.rows.length).toBe(9);
     expect(result.rows[0]?.name).toMatch(/^001_/);
-    expect(result.rows[7]?.name).toMatch(/^008_/);
+    expect(result.rows[8]?.name).toMatch(/^009_/);
   });
 
   test("is idempotent", async () => {
     await migrate();
     const result = await pool.query(`SELECT count(*) FROM _migrations`);
-    expect(Number(result.rows[0]?.count)).toBe(8);
+    expect(Number(result.rows[0]?.count)).toBe(9);
   });
 });
 
@@ -267,6 +267,52 @@ describe("acquireJob", () => {
     expect(second).toBeDefined();
     expect(second!.id).toBe(id);
     expect(second!.attempts).toBe(2);
+  });
+
+  test("filters by patterns when provided", async () => {
+    await ctx.tools.addJob({ pattern: "email.send", runAfter: PAST });
+    const { id: smsId } = await ctx.tools.addJob({ pattern: "sms.send", runAfter: PAST });
+
+    const job = await ctx.tools.acquireJob(null, ["sms.send"]);
+    expect(job).toBeDefined();
+    expect(job!.id).toBe(smsId);
+    expect(job!.pattern).toBe("sms.send");
+  });
+
+  test("filters by multiple patterns", async () => {
+    await ctx.tools.addJob({ pattern: "email.send", runAfter: PAST });
+    const { id: smsId } = await ctx.tools.addJob({ pattern: "sms.send", runAfter: PAST });
+    await ctx.tools.addJob({ pattern: "push.send", runAfter: PAST });
+
+    const first = await ctx.tools.acquireJob(null, ["sms.send", "push.send"]);
+    expect(first).toBeDefined();
+    expect(["sms.send", "push.send"]).toContain(first!.pattern);
+
+    const second = await ctx.tools.acquireJob(null, ["sms.send", "push.send"]);
+    expect(second).toBeDefined();
+    expect(["sms.send", "push.send"]).toContain(second!.pattern);
+
+    const third = await ctx.tools.acquireJob(null, ["sms.send", "push.send"]);
+    expect(third).toBeUndefined();
+  });
+
+  test("returns undefined when no jobs match patterns", async () => {
+    await ctx.tools.addJob({ pattern: "email.send", runAfter: PAST });
+    const job = await ctx.tools.acquireJob(null, ["sms.send"]);
+    expect(job).toBeUndefined();
+  });
+
+  test("null patterns acquires any job (same as no filter)", async () => {
+    const { id } = await ctx.tools.addJob({ pattern: "email.send", runAfter: PAST });
+    const job = await ctx.tools.acquireJob(null, null);
+    expect(job).toBeDefined();
+    expect(job!.id).toBe(id);
+  });
+
+  test("empty patterns array acquires no jobs", async () => {
+    await ctx.tools.addJob({ pattern: "email.send", runAfter: PAST });
+    const job = await ctx.tools.acquireJob(null, []);
+    expect(job).toBeUndefined();
   });
 });
 

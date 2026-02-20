@@ -106,10 +106,10 @@ export class Tools {
     return jobs.map((j) => ({ id: j.id }));
   }
 
-  async acquireJob(lockedBy?: string | null): Promise<Job | undefined> {
+  async acquireJob(lockedBy?: string | null, patterns?: string[] | null): Promise<Job | undefined> {
     const result = await this.pool.query<Job>(
-      `SELECT * FROM acquire_job($1)`,
-      [lockedBy ?? null],
+      `SELECT * FROM acquire_job($1, $2)`,
+      [lockedBy ?? null, patterns ?? null],
     );
     const row = result.rows[0] ?? undefined;
     return row;
