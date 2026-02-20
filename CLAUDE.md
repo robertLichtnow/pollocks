@@ -13,7 +13,7 @@ Connection string: `postgres://postgres:postgres@localhost:5432/pollocks`
 
 ## Commands
 
-- `bun test` — run tests (requires Postgres running)
+- `bun test` — run tests (requires `bun install` and Postgres running first)
 - `bun run build` — build to `dist/` targeting Node
 - `bun run lint` — lint with oxlint
 - `bun run migration <name>` — scaffold a new SQL migration file
@@ -21,7 +21,7 @@ Connection string: `postgres://postgres:postgres@localhost:5432/pollocks`
 
 ## Architecture
 
-- `src/tools.ts` — main `Tools` class: `migrate()`, `addJob()`, `acquireJob()`, `completeJob()`, `completeJobs()`
+- `src/tools.ts` — main `Tools` class: `migrate()`, `addJob()`, `addJobs()`, `acquireJob()`, `acquireJobs()`, `completeJob()`, `completeJobs()`
 - `src/worker.ts` — `Worker` class (stub, not yet implemented)
 - `src/types.ts` — `Job` type definition
 - `src/pg-storage.ts` — custom Umzug storage adapter for Postgres
@@ -30,7 +30,11 @@ Core job operations (add, acquire, complete) are implemented as PostgreSQL funct
 
 ## Testing
 
-Tests run against a real Postgres database using Bun's built-in test runner. Requires `bun run docker:up` first.
+Tests run against a real Postgres database using Bun's built-in test runner.
+
+**Before running tests**, ensure:
+1. Dependencies are installed: `bun install`
+2. Postgres is running: `docker start pollocks-postgres` (or `bun run docker:up` on first run)
 
 - `src/test-setup.ts` — shared pool, singleton migrate with advisory lock, `createTestContext()` helper
 - `src/tools.spec.ts` — all Tools class tests (lives alongside `tools.ts`)

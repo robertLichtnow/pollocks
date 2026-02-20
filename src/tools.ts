@@ -115,6 +115,14 @@ export class Tools {
     return row;
   }
 
+  async acquireJobs(max: number, lockedBy?: string | null, patterns?: string[] | null): Promise<Job[]> {
+    const result = await this.pool.query<Job>(
+      `SELECT * FROM acquire_jobs($1, $2, $3)`,
+      [max, lockedBy ?? null, patterns ?? null],
+    );
+    return result.rows;
+  }
+
   async completeJob(id: string): Promise<void> {
     await this.pool.query(`SELECT complete_job($1)`, [id]);
   }

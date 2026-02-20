@@ -25,15 +25,15 @@ describe("migrate", () => {
     const result = await pool.query(
       `SELECT name FROM _migrations ORDER BY name`,
     );
-    expect(result.rows.length).toBe(9);
+    expect(result.rows.length).toBe(10);
     expect(result.rows[0]?.name).toMatch(/^001_/);
-    expect(result.rows[8]?.name).toMatch(/^009_/);
+    expect(result.rows[9]?.name).toMatch(/^010_/);
   });
 
   test("is idempotent", async () => {
     await migrate();
     const result = await pool.query(`SELECT count(*) FROM _migrations`);
-    expect(Number(result.rows[0]?.count)).toBe(9);
+    expect(Number(result.rows[0]?.count)).toBe(10);
   });
 });
 
@@ -313,6 +313,107 @@ describe("acquireJob", () => {
     await ctx.tools.addJob({ pattern: "email.send", runAfter: PAST });
     const job = await ctx.tools.acquireJob(null, []);
     expect(job).toBeUndefined();
+  });
+});
+
+describe("acquireJobs", () => {
+  test("returns empty array when no jobs exist", async () => {
+    const jobs = await ctx.tools.acquireJobs(5);
+    expect(jobs).toEqual([]);
+  });
+
+  test("acquires up to max jobs", async () => {
+    for (let i = 0; i < 5; i++) {
+      await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    }
+    const jobs = await ctx.tools.acquireJobs(3);
+    expect(jobs.length).toBe(3);
+  });
+
+  test("acquires fewer than max when not enough available", async () => {
+    await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    const jobs = await ctx.tools.acquireJobs(5);
+    expect(jobs.length).toBe(2);
+  });
+
+  test("locks all acquired jobs", async () => {
+    for (let i = 0; i < 3; i++) {
+      await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    }
+    const jobs = await ctx.tools.acquireJobs(3);
+    for (const job of jobs) {
+      expect(job.locked_by).toBe("administrator");
+      expect(job.locked_until).toBeDefined();
+      expect(job.attempts).toBe(1);
+    }
+  });
+
+  test("sets locked_by to custom value", async () => {
+    await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    const jobs = await ctx.tools.acquireJobs(1, "worker-1");
+    expect(jobs[0]!.locked_by).toBe("worker-1");
+  });
+
+  test("does not re-acquire already locked jobs", async () => {
+    for (let i = 0; i < 3; i++) {
+      await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    }
+    const first = await ctx.tools.acquireJobs(2);
+    expect(first.length).toBe(2);
+
+    const second = await ctx.tools.acquireJobs(5);
+    expect(second.length).toBe(1);
+  });
+
+  test("filters by patterns", async () => {
+    await ctx.tools.addJob({ pattern: "email.send", runAfter: PAST });
+    await ctx.tools.addJob({ pattern: "sms.send", runAfter: PAST });
+    await ctx.tools.addJob({ pattern: "push.send", runAfter: PAST });
+
+    const jobs = await ctx.tools.acquireJobs(5, null, ["sms.send", "push.send"]);
+    expect(jobs.length).toBe(2);
+    for (const job of jobs) {
+      expect(["sms.send", "push.send"]).toContain(job.pattern);
+    }
+  });
+
+  test("returns jobs in runAfter order", async () => {
+    await ctx.tools.addJob({ pattern: "late", runAfter: new Date(Date.now() - 30_000) });
+    await ctx.tools.addJob({ pattern: "early", runAfter: new Date(Date.now() - 120_000) });
+    await ctx.tools.addJob({ pattern: "mid", runAfter: new Date(Date.now() - 60_000) });
+
+    const jobs = await ctx.tools.acquireJobs(3);
+    expect(jobs[0]!.pattern).toBe("early");
+    expect(jobs[1]!.pattern).toBe("mid");
+    expect(jobs[2]!.pattern).toBe("late");
+  });
+
+  test("returns unique job ids", async () => {
+    for (let i = 0; i < 5; i++) {
+      await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    }
+    const jobs = await ctx.tools.acquireJobs(5);
+    const ids = new Set(jobs.map((j) => j.id));
+    expect(ids.size).toBe(5);
+  });
+
+  test("skips jobs with runAfter in the future", async () => {
+    await ctx.tools.addJob({ pattern: "past", runAfter: PAST });
+    await ctx.tools.addJob({ pattern: "future", runAfter: new Date(Date.now() + 3_600_000) });
+    const jobs = await ctx.tools.acquireJobs(5);
+    expect(jobs.length).toBe(1);
+    expect(jobs[0]!.pattern).toBe("past");
+  });
+
+  test("skips jobs that exceeded max_attempts", async () => {
+    const { id } = await ctx.tools.addJob({ pattern: "maxed", runAfter: PAST });
+    await ctx.query("UPDATE jobs SET attempts = max_attempts WHERE id = $1", [id]);
+    await ctx.tools.addJob({ pattern: "ok", runAfter: PAST });
+
+    const jobs = await ctx.tools.acquireJobs(5);
+    expect(jobs.length).toBe(1);
+    expect(jobs[0]!.pattern).toBe("ok");
   });
 });
 
