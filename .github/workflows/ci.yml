@@ -38,7 +38,7 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - run: bun test --reporter=default --reporter=junit > test-results.xml
+      - run: bun test --reporter=default --reporter=junit --reporter-outfile=test-results.xml
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/pollocks
 
