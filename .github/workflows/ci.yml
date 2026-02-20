@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    name: Test / Postgres ${{ matrix.postgres-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -33,39 +34,56 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
       - run: bun install --frozen-lockfile
-
-      - run: bun test
+      - run: bun test --reporter=default --reporter=junit > test-results.xml
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/pollocks
 
+      - name: Add test results to summary
+        if: always()
+        run: |
+          echo "## Test Results — Postgres ${{ matrix.postgres-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          # Parse JUnit XML into a markdown summary
+          python3 -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('test-results.xml')
+          root = tree.getroot()
+          for suite in root.iter('testsuite'):
+              name = suite.get('name', 'unknown')
+              tests = suite.get('tests', '0')
+              failures = suite.get('failures', '0')
+              time = suite.get('time', '0')
+              status = '✅' if failures == '0' else '❌'
+              print(f'{status} **{name}** — {tests} tests, {time}s')
+              for tc in suite.findall('testcase'):
+                  tc_name = tc.get('name', '')
+                  failure = tc.find('failure')
+                  if failure is not None:
+                      print(f'  - ❌ {tc_name}: {failure.get(\"message\", \"\")[:100]}')
+          " >> $GITHUB_STEP_SUMMARY
+
   lint:
     runs-on: ubuntu-latest
+    name: Lint
     steps:
       - uses: actions/checkout@v4
-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
       - run: bun install --frozen-lockfile
-
       - run: bun run lint
 
   build:
     runs-on: ubuntu-latest
+    name: Build
     steps:
       - uses: actions/checkout@v4
-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
       - run: bun install --frozen-lockfile
-
       - run: bun run build
