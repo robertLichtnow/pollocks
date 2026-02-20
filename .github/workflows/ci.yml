@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Test / Postgres ${{ matrix.postgres-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres-version: [13, 14, 15, 16, 17, 18]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Postgres image
+        id: cache-postgres
+        uses: actions/cache@v4
+        with:
+          path: /tmp/docker-cache
+          key: postgres-${{ matrix.postgres-version }}
+
+      - name: Load or pull Postgres image
+        run: |
+          if [ -f /tmp/docker-cache/postgres.tar ]; then
+            docker load < /tmp/docker-cache/postgres.tar
+          else
+            docker pull postgres:${{ matrix.postgres-version }}
+            mkdir -p /tmp/docker-cache
+            docker save postgres:${{ matrix.postgres-version }} > /tmp/docker-cache/postgres.tar
+          fi
+
+      - name: Start Postgres
+        run: |
+          docker run -d --name postgres \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=pollocks \
+            -e TZ=UTC -e PGTZ=UTC \
+            -p 5432:5432 \
+            postgres:${{ matrix.postgres-version }}
+          until docker exec postgres pg_isready -U postgres 2>/dev/null; do sleep 0.5; done
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun test --reporter=default --reporter=junit --reporter-outfile=test-results.xml
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/pollocks
+
+      - name: Add test results to summary
+        if: always()
+        run: |
+          echo "## Test Results — Postgres ${{ matrix.postgres-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          # Parse JUnit XML into a markdown summary
+          python3 -c "
+          import xml.etree.ElementTree as ET, sys, os
+          if not os.path.exists('test-results.xml'):
+              print('⚠️ No test results file found')
+              sys.exit(0)
+          tree = ET.parse('test-results.xml')
+          root = tree.getroot()
+          for suite in root.iter('testsuite'):
+              name = suite.get('name', 'unknown')
+              tests = suite.get('tests', '0')
+              failures = suite.get('failures', '0')
+              time = suite.get('time', '0')
+              status = '✅' if failures == '0' else '❌'
+              print(f'{status} **{name}** — {tests} tests, {time}s')
+              for tc in suite.findall('testcase'):
+                  tc_name = tc.get('name', '')
+                  failure = tc.find('failure')
+                  if failure is not None:
+                      print(f'  - ❌ {tc_name}: {failure.get(\"message\", \"\")[:100]}')
+          " >> $GITHUB_STEP_SUMMARY
+
+  lint:
+    runs-on: ubuntu-latest
+    name: Lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+
+  build:
+    runs-on: ubuntu-latest
+    name: Build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run build

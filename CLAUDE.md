@@ -13,7 +13,7 @@ Connection string: `postgres://postgres:postgres@localhost:5432/pollocks`
 
 ## Commands
 
-- `bun run sample` — run the sample script (creates jobs, acquires them, completes them)
+- `bun test` — run tests (requires Postgres running)
 - `bun run build` — build to `dist/` targeting Node
 - `bun run lint` — lint with oxlint
 - `bun run migration <name>` — scaffold a new SQL migration file
@@ -26,9 +26,27 @@ Connection string: `postgres://postgres:postgres@localhost:5432/pollocks`
 - `src/types.ts` — `Job` type definition
 - `src/pg-storage.ts` — custom Umzug storage adapter for Postgres
 - `src/migrations/*.sql` — SQL migrations run via Umzug; each wraps in a transaction
-- `src/sample.ts` — example usage script
-
 Core job operations (add, acquire, complete) are implemented as PostgreSQL functions. Migrations are plain `.sql` files.
+
+## Testing
+
+Tests run against a real Postgres database using Bun's built-in test runner. Requires `bun run docker:up` first.
+
+- `src/test-setup.ts` — shared pool, singleton migrate with advisory lock, `createTestContext()` helper
+- `src/tools.spec.ts` — all Tools class tests (lives alongside `tools.ts`)
+
+**Test isolation**: each test runs inside a transaction that is rolled back in `afterEach`. No data is ever committed, making cleanup instant. Every test file follows this pattern:
+
+```typescript
+let ctx: TestContext;
+beforeAll(migrate);
+beforeEach(async () => { ctx = await createTestContext(); });
+afterEach(async () => { await ctx.rollback(); });
+```
+
+**`runAfter` in acquire tests**: Postgres `now()` is frozen at `BEGIN` time inside transactions. Tests that call `acquireJob()` must pass an explicit `runAfter` date in the past so the job is eligible for acquisition.
+
+**CI**: GitHub Actions runs tests against Postgres 13–18 via a matrix of service containers (`.github/workflows/test.yml`).
 
 ## Conventions
 
