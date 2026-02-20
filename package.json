@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "bun build src/index.ts --outdir ./dist --target node",
+    "test": "bun test",
     "lint": "oxlint",
     "migration": "bun run scripts/new-migration.ts",
-    "sample": "bun run src/sample.ts",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down"
   },
