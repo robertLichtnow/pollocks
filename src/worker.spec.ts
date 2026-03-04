@@ -9,9 +9,11 @@ import {
 import {
   migrate,
   createTestContext,
+  pool,
   type TestContext,
 } from "./test-setup.ts";
 import { Worker, type WorkerEventMap, type WorkerEventName } from "./worker.ts";
+import { Tools } from "./tools.ts";
 import type { Job } from "./types.ts";
 import type { Pool } from "pg";
 
@@ -449,5 +451,207 @@ describe("kill", () => {
     await worker.start();
     await startPromise;
     await worker.stop();
+  });
+});
+
+// --- Listen mode tests ---
+// NOTIFY requires committed transactions, so these use the real pool
+// with manual cleanup instead of transactional test context.
+
+describe("listen mode", () => {
+  const tools = new Tools(pool);
+  const createdJobIds: string[] = [];
+
+  afterEach(async () => {
+    if (createdJobIds.length > 0) {
+      await pool.query("DELETE FROM jobs WHERE id = ANY($1)", [createdJobIds]);
+      createdJobIds.length = 0;
+    }
+  });
+
+  async function addJob(pattern: string) {
+    const { id } = await tools.addJob({ pattern });
+    createdJobIds.push(id);
+    return id;
+  }
+
+  test("processes a job triggered by NOTIFY", async () => {
+    let handledJob: Job | undefined;
+    const worker = new Worker(
+      pool,
+      {
+        "listen.test.a": async (job) => {
+          handledJob = job;
+        },
+      },
+      { mode: "listen" },
+    );
+
+    const successPromise = waitForEvent(worker, "success");
+    await worker.start();
+
+    // Add job after worker is listening
+    await addJob("listen.test.a");
+    await successPromise;
+    await worker.stop();
+
+    expect(handledJob).toBeDefined();
+    expect(handledJob!.pattern).toBe("listen.test.a");
+  });
+
+  test("emits listen event with pattern", async () => {
+    const worker = new Worker(
+      pool,
+      { "listen.test.b": async () => {} },
+      { mode: "listen" },
+    );
+
+    const listenPromise = waitForEvent(worker, "listen");
+    await worker.start();
+
+    await addJob("listen.test.b");
+    const data = await listenPromise;
+    await worker.stop();
+
+    expect(data.runnerId).toBe(0);
+    expect(data.pattern).toBe("listen.test.b");
+  });
+
+  test("calls correct handler based on pattern", async () => {
+    const called: string[] = [];
+    const worker = new Worker(
+      pool,
+      {
+        "listen.test.email": async () => { called.push("email"); },
+        "listen.test.sms": async () => { called.push("sms"); },
+      },
+      { mode: "listen" },
+    );
+
+    const successPromise = waitForEvent(worker, "success");
+    await worker.start();
+
+    await addJob("listen.test.sms");
+    await successPromise;
+    await worker.stop();
+
+    expect(called).toEqual(["sms"]);
+  });
+
+  test("ignores notifications for unregistered patterns", async () => {
+    const called: string[] = [];
+    const worker = new Worker(
+      pool,
+      { "listen.test.registered": async () => { called.push("hit"); } },
+      { mode: "listen" },
+    );
+
+    await worker.start();
+
+    // Add a job with a pattern not registered on the worker
+    const { id } = await tools.addJob({ pattern: "listen.test.unregistered" });
+    createdJobIds.push(id);
+
+    // Wait a bit to confirm nothing fires
+    await new Promise((r) => setTimeout(r, 200));
+    await worker.stop();
+
+    expect(called).toEqual([]);
+  });
+
+  test("emits failure event when handler throws", async () => {
+    const worker = new Worker(
+      pool,
+      {
+        "listen.test.fail": async () => {
+          throw new Error("listen boom");
+        },
+      },
+      { mode: "listen" },
+    );
+
+    const failurePromise = waitForEvent(worker, "failure");
+    await worker.start();
+
+    await addJob("listen.test.fail");
+    const data = await failurePromise;
+    await worker.stop();
+
+    expect(data.error).toBeInstanceOf(Error);
+    expect((data.error as Error).message).toBe("listen boom");
+  });
+
+  test("stop releases the LISTEN client", async () => {
+    const worker = new Worker(
+      pool,
+      { "listen.test.stop": async () => {} },
+      { mode: "listen" },
+    );
+
+    await worker.start();
+    const stopPromise = waitForEvent(worker, "stop");
+    await worker.stop();
+    await stopPromise;
+
+    // Worker should be fully stopped; can restart
+    const startPromise = waitForEvent(worker, "start");
+    await worker.start();
+    await startPromise;
+    await worker.stop();
+  });
+
+  test("processes jobs from notifications that arrived while all runners were busy", async () => {
+    let callCount = 0;
+    const worker = new Worker(
+      pool,
+      {
+        "listen.test.busy": async () => {
+          callCount++;
+          // First job takes a while, so the second notification arrives
+          // while this runner is busy
+          if (callCount === 1) {
+            await new Promise((r) => setTimeout(r, 200));
+          }
+        },
+      },
+      { mode: "listen", parallelism: 1 },
+    );
+
+    let successCount = 0;
+    const bothDone = new Promise<void>((resolve) => {
+      worker.events.on("success", () => {
+        successCount++;
+        if (successCount >= 2) resolve();
+      });
+    });
+
+    await worker.start();
+
+    // Add first job — runner picks it up
+    await addJob("listen.test.busy");
+    // Wait for runner to start processing
+    await new Promise((r) => setTimeout(r, 50));
+    // Add second job while runner is busy — without pending counter this would be lost
+    await addJob("listen.test.busy");
+
+    await bothDone;
+    await worker.stop();
+
+    expect(successCount).toBe(2);
+  });
+
+  test("kill emits shutdown event", async () => {
+    const worker = new Worker(
+      pool,
+      { "listen.test.kill": async () => {} },
+      { mode: "listen" },
+    );
+
+    await worker.start();
+    const shutdownPromise = waitForEvent(worker, "shutdown");
+    await worker.kill();
+    const data = await shutdownPromise;
+
+    expect(data.forced).toBe(true);
   });
 });

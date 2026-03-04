@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { ulid } from "ulid";
 import { Tools } from "./tools";
 import type { Job } from "./types";
@@ -12,6 +12,8 @@ export type MessageHandler = (job: Job) => Promise<void> | void;
 export type MessageHandlers = Record<string, MessageHandler>;
 
 export type Mode = "poll" | "listen";
+
+export const CHANNEL = "pollocks_new_job";
 
 export interface WorkerConfig {
   parallelism?: number;
@@ -32,6 +34,7 @@ export interface WorkerEventMap {
   stop: {};
   shutdown: { forced: boolean };
   poll: { runnerId: number };
+  listen: { runnerId: number; pattern: string };
   acquire: { runnerId: number; job: Job };
   success: { runnerId: number; job: Job; durationMs: number };
   failure: { runnerId: number; job: Job; error: unknown; durationMs: number };
@@ -50,6 +53,10 @@ export class Worker {
   private sleepResolvers = new Set<() => void>();
   private readonly patterns: string[];
   private readonly lockedBy: string;
+
+  // Listen mode state
+  private listenClient: PoolClient | null = null;
+  private waitingRunners: Array<(pattern: string) => void> = [];
 
   constructor(
     readonly pool: Pool,
@@ -72,26 +79,35 @@ export class Worker {
   async start(): Promise<void> {
     if (this.runners.length > 0) return;
     this.stopping = false;
-    const { parallelism } = this.mergedConfig;
+    const { parallelism, mode } = this.mergedConfig;
+
+    if (mode === "listen") {
+      await this.startListening();
+    }
 
     this.events.emit("start", { patterns: this.patterns });
 
     for (let i = 0; i < parallelism; i++) {
-      this.runners.push(this.runLoop(i));
+      this.runners.push(
+        mode === "listen" ? this.listenLoop(i) : this.pollLoop(i),
+      );
     }
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
     this.wakeAllSleepers();
+    this.wakeAllWaitingRunners();
     await Promise.all(this.runners);
     this.runners = [];
+    await this.stopListening();
     this.events.emit("stop", {});
   }
 
   async kill(): Promise<void> {
     this.stopping = true;
     this.wakeAllSleepers();
+    this.wakeAllWaitingRunners();
 
     const failPromises = Array.from(this.activeJobs.entries()).map(
       ([, job]) => this.tools.failJob(job.id, "Worker killed").catch(() => {}),
@@ -101,10 +117,81 @@ export class Worker {
     // We can't halt in-flight promises in JS, so we don't await runners.
     // The active jobs have been unlocked via failJob above.
     this.runners = [];
+    await this.stopListening();
     this.events.emit("shutdown", { forced: true });
   }
 
-  private async runLoop(runnerId: number): Promise<void> {
+  // --- Listen mode ---
+
+  private async startListening(): Promise<void> {
+    this.listenClient = await this.pool.connect();
+    await this.listenClient.query(`LISTEN ${CHANNEL}`);
+    this.listenClient.on("notification", this.onNotification);
+  }
+
+  private async stopListening(): Promise<void> {
+    if (!this.listenClient) return;
+    this.listenClient.removeListener("notification", this.onNotification);
+    try {
+      await this.listenClient.query(`UNLISTEN ${CHANNEL}`);
+    } catch {
+      // Client may already be disconnected
+    }
+    this.listenClient.release();
+    this.listenClient = null;
+  }
+
+  private onNotification = (msg: { channel: string; payload?: string }) => {
+    if (msg.channel !== CHANNEL) return;
+    const pattern = msg.payload ?? "";
+    if (!this.patterns.includes(pattern)) return;
+
+    const waiter = this.waitingRunners.shift();
+    if (waiter) {
+      waiter(pattern);
+    }
+  };
+
+  private waitForNotification(): Promise<string> {
+    return new Promise((resolve) => {
+      if (this.stopping) {
+        resolve("");
+        return;
+      }
+      this.waitingRunners.push(resolve);
+    });
+  }
+
+  private wakeAllWaitingRunners(): void {
+    for (const resolve of this.waitingRunners) {
+      resolve("");
+    }
+    this.waitingRunners = [];
+  }
+
+  private async listenLoop(runnerId: number): Promise<void> {
+    while (!this.stopping) {
+      const pattern = await this.waitForNotification();
+
+      if (this.stopping || !pattern) break;
+
+      this.events.emit("listen", { runnerId, pattern });
+
+      // Drain: keep acquiring jobs until none are left, then wait for the
+      // next notification. This handles notifications that arrived while
+      // this runner was busy, without assuming we're the only worker.
+      let job = await this.tools.acquireJob(this.lockedBy, this.patterns);
+      while (job) {
+        await this.executeJob(runnerId, job);
+        if (this.stopping) break;
+        job = await this.tools.acquireJob(this.lockedBy, this.patterns);
+      }
+    }
+  }
+
+  // --- Poll mode ---
+
+  private async pollLoop(runnerId: number): Promise<void> {
     while (!this.stopping) {
       this.events.emit("poll", { runnerId });
 
@@ -115,26 +202,32 @@ export class Worker {
         continue;
       }
 
-      this.events.emit("acquire", { runnerId, job });
-      this.activeJobs.set(runnerId, job);
+      await this.executeJob(runnerId, job);
+    }
+  }
 
-      const handler = this.handlers[job.pattern];
-      const startTime = Date.now();
+  // --- Shared ---
 
-      try {
-        await handler!(job);
-        const durationMs = Date.now() - startTime;
-        await this.tools.completeJob(job.id);
-        this.events.emit("success", { runnerId, job, durationMs });
-      } catch (error: unknown) {
-        const durationMs = Date.now() - startTime;
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        await this.tools.failJob(job.id, errorMessage);
-        this.events.emit("failure", { runnerId, job, error, durationMs });
-      } finally {
-        this.activeJobs.delete(runnerId);
-      }
+  private async executeJob(runnerId: number, job: Job): Promise<void> {
+    this.events.emit("acquire", { runnerId, job });
+    this.activeJobs.set(runnerId, job);
+
+    const handler = this.handlers[job.pattern];
+    const startTime = Date.now();
+
+    try {
+      await handler!(job);
+      const durationMs = Date.now() - startTime;
+      await this.tools.completeJob(job.id);
+      this.events.emit("success", { runnerId, job, durationMs });
+    } catch (error: unknown) {
+      const durationMs = Date.now() - startTime;
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      await this.tools.failJob(job.id, errorMessage);
+      this.events.emit("failure", { runnerId, job, error, durationMs });
+    } finally {
+      this.activeJobs.delete(runnerId);
     }
   }
 
