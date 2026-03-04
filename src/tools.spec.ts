@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
 import { migrate, createTestContext, pool, type TestContext } from "./test-setup.ts";
+import { Tools } from "./tools.ts";
 
 let ctx: TestContext;
 
@@ -25,15 +26,15 @@ describe("migrate", () => {
     const result = await pool.query(
       `SELECT name FROM _migrations ORDER BY name`,
     );
-    expect(result.rows.length).toBe(11);
+    expect(result.rows.length).toBe(12);
     expect(result.rows[0]?.name).toMatch(/^001_/);
-    expect(result.rows[10]?.name).toMatch(/^011_/);
+    expect(result.rows[11]?.name).toMatch(/^012_/);
   });
 
   test("is idempotent", async () => {
     await migrate();
     const result = await pool.query(`SELECT count(*) FROM _migrations`);
-    expect(Number(result.rows[0]?.count)).toBe(11);
+    expect(Number(result.rows[0]?.count)).toBe(12);
   });
 });
 
@@ -572,5 +573,59 @@ describe("end-to-end", () => {
 
     const count = await ctx.query("SELECT count(*) FROM jobs");
     expect(Number(count.rows[0]?.count)).toBe(0);
+  });
+});
+
+describe("NOTIFY on addJob", () => {
+  // NOTIFY is only delivered after COMMIT, so we use the real pool
+  // with manual cleanup instead of the transactional test context.
+
+  test("addJob emits notification with pattern as payload", async () => {
+    const client = await pool.connect();
+    await client.query("LISTEN pollocks_new_job");
+
+    const notifications: { channel: string; payload?: string }[] = [];
+    client.on("notification", (msg) => notifications.push(msg));
+
+    const tools = new Tools(pool);
+    const { id } = await tools.addJob({ pattern: "notify.test.single" });
+
+    // Give notification time to arrive
+    await new Promise((r) => setTimeout(r, 100));
+
+    await client.query("UNLISTEN pollocks_new_job");
+    client.removeAllListeners("notification");
+    client.release();
+    await pool.query("DELETE FROM jobs WHERE id = $1", [id]);
+
+    expect(notifications.length).toBe(1);
+    expect(notifications[0]?.channel).toBe("pollocks_new_job");
+    expect(notifications[0]?.payload).toBe("notify.test.single");
+  });
+
+  test("addJobs emits one notification per distinct pattern", async () => {
+    const client = await pool.connect();
+    await client.query("LISTEN pollocks_new_job");
+
+    const notifications: { channel: string; payload?: string }[] = [];
+    client.on("notification", (msg) => notifications.push(msg));
+
+    const tools = new Tools(pool);
+    const ids = await tools.addJobs([
+      { pattern: "notify.test.a" },
+      { pattern: "notify.test.b" },
+      { pattern: "notify.test.a" }, // duplicate pattern
+    ]);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    await client.query("UNLISTEN pollocks_new_job");
+    client.removeAllListeners("notification");
+    client.release();
+    await pool.query("DELETE FROM jobs WHERE id = ANY($1)", [ids.map((j) => j.id)]);
+
+    expect(notifications.length).toBe(2);
+    const payloads = notifications.map((n) => n.payload).sort();
+    expect(payloads).toEqual(["notify.test.a", "notify.test.b"]);
   });
 });
