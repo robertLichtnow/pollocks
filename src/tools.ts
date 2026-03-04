@@ -130,4 +130,8 @@ export class Tools {
   async completeJobs(ids: string[]): Promise<void> {
     await this.pool.query(`SELECT complete_jobs($1)`, [ids]);
   }
+
+  async failJob(id: string, error?: string): Promise<void> {
+    await this.pool.query(`SELECT fail_job($1, $2)`, [id, error ?? null]);
+  }
 }

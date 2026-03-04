@@ -25,15 +25,15 @@ describe("migrate", () => {
     const result = await pool.query(
       `SELECT name FROM _migrations ORDER BY name`,
     );
-    expect(result.rows.length).toBe(10);
+    expect(result.rows.length).toBe(11);
     expect(result.rows[0]?.name).toMatch(/^001_/);
-    expect(result.rows[9]?.name).toMatch(/^010_/);
+    expect(result.rows[10]?.name).toMatch(/^011_/);
   });
 
   test("is idempotent", async () => {
     await migrate();
     const result = await pool.query(`SELECT count(*) FROM _migrations`);
-    expect(Number(result.rows[0]?.count)).toBe(10);
+    expect(Number(result.rows[0]?.count)).toBe(11);
   });
 });
 
@@ -471,6 +471,65 @@ describe("completeJobs", () => {
     await ctx.tools.completeJobs([id, "nonexistent-1", "nonexistent-2"]);
     const result = await ctx.query("SELECT count(*) FROM jobs");
     expect(Number(result.rows[0]?.count)).toBe(0);
+  });
+});
+
+describe("failJob", () => {
+  test("unlocks the job by clearing locking columns", async () => {
+    const { id } = await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    await ctx.tools.acquireJob();
+    await ctx.tools.failJob(id);
+    const result = await ctx.query("SELECT * FROM jobs WHERE id = $1", [id]);
+    const job = result.rows[0];
+    expect(job?.locked_by).toBeNull();
+    expect(job?.locked_until).toBeNull();
+    expect(job?.locked_at).toBeNull();
+  });
+
+  test("sets last_error when error is provided", async () => {
+    const { id } = await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    await ctx.tools.acquireJob();
+    await ctx.tools.failJob(id, "connection timeout");
+    const result = await ctx.query("SELECT last_error FROM jobs WHERE id = $1", [id]);
+    expect(result.rows[0]?.last_error).toBe("connection timeout");
+  });
+
+  test("sets last_error to null when no error is provided", async () => {
+    const { id } = await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    await ctx.tools.acquireJob();
+    await ctx.tools.failJob(id);
+    const result = await ctx.query("SELECT last_error FROM jobs WHERE id = $1", [id]);
+    expect(result.rows[0]?.last_error).toBeNull();
+  });
+
+  test("does not throw for non-existent job id", async () => {
+    await ctx.tools.failJob("nonexistent-id");
+  });
+
+  test("preserves attempts count", async () => {
+    const { id } = await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    await ctx.tools.acquireJob();
+    await ctx.tools.failJob(id);
+    const result = await ctx.query("SELECT attempts FROM jobs WHERE id = $1", [id]);
+    expect(result.rows[0]?.attempts).toBe(1);
+  });
+
+  test("job can be re-acquired after failing", async () => {
+    const { id } = await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    await ctx.tools.acquireJob();
+    await ctx.tools.failJob(id, "first failure");
+    const job = await ctx.tools.acquireJob();
+    expect(job).toBeDefined();
+    expect(job!.id).toBe(id);
+    expect(job!.attempts).toBe(2);
+  });
+
+  test("does not remove the job from the database", async () => {
+    const { id } = await ctx.tools.addJob({ pattern: "test", runAfter: PAST });
+    await ctx.tools.acquireJob();
+    await ctx.tools.failJob(id);
+    const result = await ctx.query("SELECT count(*) FROM jobs WHERE id = $1", [id]);
+    expect(Number(result.rows[0]?.count)).toBe(1);
   });
 });
 
