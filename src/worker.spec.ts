@@ -640,6 +640,55 @@ describe("listen mode", () => {
     expect(successCount).toBe(2);
   });
 
+  test("polls periodically as a safety net", async () => {
+    const pollEvents: number[] = [];
+    const worker = new Worker(
+      pool,
+      { "listen.test.poll": async () => {} },
+      { mode: "listen", pollIntervalMs: 50 },
+    );
+
+    worker.events.on("poll", () => {
+      pollEvents.push(Date.now());
+      if (pollEvents.length >= 2) {
+        worker.stop();
+      }
+    });
+
+    await worker.start();
+    await waitForEvent(worker, "stop");
+
+    // Should have emitted at least 2 poll events
+    expect(pollEvents.length).toBeGreaterThanOrEqual(2);
+    const gap = pollEvents[1]! - pollEvents[0]!;
+    expect(gap).toBeGreaterThanOrEqual(40);
+  });
+
+  test("picks up jobs without NOTIFY via polling", async () => {
+    const worker = new Worker(
+      pool,
+      { "listen.test.sneaky": async () => {} },
+      { mode: "listen", pollIntervalMs: 50 },
+    );
+
+    const successPromise = waitForEvent(worker, "success");
+    await worker.start();
+
+    // Insert job directly, bypassing the addJob function's NOTIFY
+    const id = require("ulid").ulid();
+    await pool.query(
+      `INSERT INTO jobs (id, pattern, payload, run_after)
+       VALUES ($1, $2, $3, NOW())`,
+      [id, "listen.test.sneaky", "{}"],
+    );
+    createdJobIds.push(id);
+
+    const data = await successPromise;
+    await worker.stop();
+
+    expect(data.job.pattern).toBe("listen.test.sneaky");
+  });
+
   test("kill emits shutdown event", async () => {
     const worker = new Worker(
       pool,
