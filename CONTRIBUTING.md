@@ -85,3 +85,19 @@ This creates a new numbered `.sql` file in `src/migrations/`. Migrations are pla
 4. Open a PR against `main`
 
 CI will run tests against PostgreSQL 13 through 18, lint the code, verify the build output, and check that all commit messages follow the conventional format.
+
+## Releases
+
+Releases are automated via [release-please](https://github.com/googleapis/release-please). The process works as follows:
+
+1. PRs are merged into `main` with conventional commit messages.
+2. On each push to `main`, release-please scans the new commits and either creates or updates a single open "Release PR". This PR bumps the version in `package.json`, updates `CHANGELOG.md`, and updates `.release-please-manifest.json`. If no conventional commits (`feat:`, `fix:`, etc.) are found, nothing happens.
+3. The Release PR stays open and accumulates changes as more PRs are merged. Only `feat:` and `fix:` commits trigger version bumps -- `chore:`, `docs:`, and `test:` commits are excluded from the changelog.
+4. When you are ready to cut a release, merge the Release PR. Release-please then creates a GitHub Release with a git tag (e.g., `v1.2.0`).
+5. To publish to npm, manually trigger the **Publish** workflow from the Actions tab. Run it with dry-run enabled first to verify the package contents, then run it again with dry-run disabled to publish.
+
+Version bumps follow [semver](https://semver.org/):
+
+- `fix:` commits bump the patch version (e.g., 1.0.0 -> 1.0.1)
+- `feat:` commits bump the minor version (e.g., 1.0.0 -> 1.1.0)
+- `BREAKING CHANGE:` in the commit body or `!` after the type bumps the major version (e.g., 1.0.0 -> 2.0.0)
