@@ -46,7 +46,7 @@ export type WorkerEventName = keyof WorkerEventMap;
 
 export class Worker {
   readonly tools: Tools;
-  readonly events = new TypedEventEmitter<WorkerEventMap>();
+  readonly events: TypedEventEmitter<WorkerEventMap> = new TypedEventEmitter<WorkerEventMap>();
   private runners: Promise<void>[] = [];
   private activeJobs = new Map<number, Job>();
   private stopping = false;
@@ -61,7 +61,7 @@ export class Worker {
   constructor(
     readonly pool: Pool,
     readonly handlers: MessageHandlers,
-    readonly config?: WorkerConfig,
+    readonly config: WorkerConfig | undefined = undefined,
   ) {
     this.tools = new Tools(pool);
     this.patterns = Object.keys(handlers);

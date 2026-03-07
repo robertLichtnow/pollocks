@@ -17,7 +17,12 @@ const addJobSchema = z.object({
   pattern: z.string().min(1),
 });
 
-export type AddJobInput = z.input<typeof addJobSchema>;
+export interface AddJobInput {
+  pattern: string;
+  payload?: Record<string, unknown> | unknown[];
+  runAfter?: Date | string | number;
+  lockFor?: number;
+}
 
 export class Tools {
   constructor(readonly pool: Pool) {}
@@ -60,7 +65,7 @@ export class Tools {
     });
   }
 
-  async migrate() {
+  async migrate(): Promise<void> {
     const client = await this.pool.connect();
     const umzug = this.createUmzug(client);
     try {
@@ -74,7 +79,7 @@ export class Tools {
     }
   }
 
-  async addJob(input: AddJobInput) {
+  async addJob(input: AddJobInput): Promise<{ id: string }> {
     const parsed = addJobSchema.parse(input);
     const id = ulid();
 
@@ -85,7 +90,7 @@ export class Tools {
     return { id };
   }
 
-  async addJobs(inputs: AddJobInput[]) {
+  async addJobs(inputs: AddJobInput[]): Promise<{ id: string }[]> {
     if (inputs.length === 0) return [];
 
     const jobs = inputs.map((input) => {
