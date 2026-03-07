@@ -1,5 +1,5 @@
 import pg from "pg";
-import { Worker } from "../../src/index.ts";
+import { Worker } from "pollocks";
 
 const pool = new pg.Pool({
   connectionString: "postgres://postgres:postgres@localhost:5432/pollocks",

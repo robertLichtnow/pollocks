@@ -1,0 +1,13 @@
+{
+  "name": "recipe-nestjs",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "pg": "^8.0.0",
+    "pollocks": "file:../../",
+    "reflect-metadata": "^0.2.0"
+  }
+}
