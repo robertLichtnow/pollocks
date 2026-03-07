@@ -8,7 +8,9 @@
     "lint": "oxlint",
     "migration": "bun run scripts/new-migration.ts",
     "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down"
+    "docker:down": "docker-compose down",
+    "recipe:basic": "bun run recipes/basic/run.ts",
+    "recipe:nestjs": "bun run recipes/nestjs/run.ts"
   },
   "dependencies": {
     "ulid": "^3.0.2",

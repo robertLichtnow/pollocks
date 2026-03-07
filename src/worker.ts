@@ -132,11 +132,6 @@ export class Worker {
   private async stopListening(): Promise<void> {
     if (!this.listenClient) return;
     this.listenClient.removeListener("notification", this.onNotification);
-    try {
-      await this.listenClient.query(`UNLISTEN ${CHANNEL}`);
-    } catch {
-      // Client may already be disconnected
-    }
     this.listenClient.release();
     this.listenClient = null;
   }

@@ -1,0 +1,9 @@
+{
+  "name": "recipe-basic",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "pg": "^8.0.0",
+    "pollocks": "file:../../"
+  }
+}
