@@ -157,6 +157,34 @@ export class Worker {
     });
   }
 
+  private waitForNotificationOrTimeout(timeoutMs: number): Promise<string> {
+    return new Promise((resolve) => {
+      if (this.stopping) {
+        resolve("");
+        return;
+      }
+
+      let done = false;
+
+      const onNotification = (pattern: string) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(pattern);
+      };
+
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        const idx = this.waitingRunners.indexOf(onNotification);
+        if (idx !== -1) this.waitingRunners.splice(idx, 1);
+        resolve("");
+      }, timeoutMs);
+
+      this.waitingRunners.push(onNotification);
+    });
+  }
+
   private wakeAllWaitingRunners(): void {
     for (const resolve of this.waitingRunners) {
       resolve("");
@@ -166,15 +194,22 @@ export class Worker {
 
   private async listenLoop(runnerId: number): Promise<void> {
     while (!this.stopping) {
-      const pattern = await this.waitForNotification();
+      const pattern = await this.waitForNotificationOrTimeout(
+        this.mergedConfig.pollIntervalMs,
+      );
 
-      if (this.stopping || !pattern) break;
+      if (this.stopping) break;
 
-      this.events.emit("listen", { runnerId, pattern });
+      if (pattern) {
+        this.events.emit("listen", { runnerId, pattern });
+      } else {
+        this.events.emit("poll", { runnerId });
+      }
 
       // Drain: keep acquiring jobs until none are left, then wait for the
-      // next notification. This handles notifications that arrived while
-      // this runner was busy, without assuming we're the only worker.
+      // next notification (or poll timeout). This handles notifications
+      // that arrived while this runner was busy, without assuming we're
+      // the only worker.
       let job = await this.tools.acquireJob(this.lockedBy, this.patterns);
       while (job) {
         await this.executeJob(runnerId, job);
