@@ -26,15 +26,15 @@ describe("migrate", () => {
     const result = await pool.query(
       `SELECT name FROM _migrations ORDER BY name`,
     );
-    expect(result.rows.length).toBe(12);
+    expect(result.rows.length).toBe(14);
     expect(result.rows[0]?.name).toMatch(/^001_/);
-    expect(result.rows[11]?.name).toMatch(/^012_/);
+    expect(result.rows[13]?.name).toMatch(/^014_/);
   });
 
   test("is idempotent", async () => {
     await migrate();
     const result = await pool.query(`SELECT count(*) FROM _migrations`);
-    expect(Number(result.rows[0]?.count)).toBe(12);
+    expect(Number(result.rows[0]?.count)).toBe(14);
   });
 });
 

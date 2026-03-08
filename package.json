@@ -38,6 +38,9 @@
     "migration": "bun run scripts/new-migration.ts",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
+    "bench:add": "bun run src/benchmarks/add-jobs.ts",
+    "bench:acquire": "bun run src/benchmarks/acquire-job.ts",
+    "bench": "bun run bench:add && bun run bench:acquire",
     "recipe:basic": "bun run recipes/basic/run.ts",
     "recipe:nestjs": "bun run recipes/nestjs/run.ts",
     "prepare": "husky"
