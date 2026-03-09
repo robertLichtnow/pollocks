@@ -1,6 +1,6 @@
 {
   "name": "pollocks",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A TypeScript job queue library backed by PostgreSQL",
   "type": "module",
   "license": "MIT",
