@@ -243,10 +243,21 @@ export class Worker {
     this.activeJobs.set(runnerId, job);
 
     const handler = this.handlers[job.pattern];
+
+    if (!handler) {
+      const error = new Error(
+        `No handler registered for pattern "${job.pattern}" (job ${job.id})`,
+      );
+      await this.tools.failJob(job.id, error.message);
+      this.events.emit("failure", { runnerId, job, error, durationMs: 0 });
+      this.activeJobs.delete(runnerId);
+      return;
+    }
+
     const startTime = Date.now();
 
     try {
-      await handler!(job);
+      await handler(job);
       const durationMs = Date.now() - startTime;
       await this.tools.completeJob(job.id);
       this.events.emit("success", { runnerId, job, durationMs });
