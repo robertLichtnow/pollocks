@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/robertLichtnow/pollocks/compare/v1.1.0...v1.1.1) (2026-03-09)
+
+
+### Bug Fixes
+
+* guard against missing handler in worker executeJob ([#18](https://github.com/robertLichtnow/pollocks/issues/18)) ([b963cbc](https://github.com/robertLichtnow/pollocks/commit/b963cbc4c0c02364da0da5a00a4d0bdaa82951e0))
+
 ## [1.1.0](https://github.com/robertLichtnow/pollocks/compare/v1.0.0...v1.1.0) (2026-03-08)
 
 
